@@ -15,6 +15,7 @@ build/
 project/.env
 project/.env.*
 !project/.env.example
+sharable-proteched.txt
 
 # Local Documentation, QA Notes & Research Drafts
 docs/
