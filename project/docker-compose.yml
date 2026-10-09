@@ -1,0 +1,227 @@
+name: andx
+
+services:
+  # ============================================================================
+  # 1. Message Broker: Redpanda (Kafka-compatible)
+  # ============================================================================
+  broker:
+    image: ${REDPANDA_IMAGE:-docker.redpanda.com/redpandadata/redpanda:v26.2.3}
+    container_name: ${BROKER_CONTAINER_NAME:-broker}
+    command:
+      - redpanda
+      - start
+      - --smp=${BROKER_SMP:-1}
+      - --memory=${BROKER_MEMORY_RESERVATION:-1G}
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:${KAFKA_PORT:-9092}
+      - --advertise-kafka-addr=PLAINTEXT://${BROKER_CONTAINER_NAME:-broker}:${KAFKA_PORT:-9092}
+    ports:
+      - "${KAFKA_PORT:-9092}:${KAFKA_PORT:-9092}"
+    mem_limit: ${BROKER_MEM_LIMIT:-2048m}
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster info --brokers localhost:${KAFKA_PORT:-9092} || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    networks:
+      - andx-net
+
+  # Topic provisioner (runs once)
+  redpanda-init:
+    image: ${REDPANDA_IMAGE:-docker.redpanda.com/redpandadata/redpanda:v26.2.3}
+    container_name: redpanda-init
+    depends_on:
+      broker:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./docker/redpanda/init-topics.sh:/init-topics.sh:ro
+    entrypoint: ["/bin/sh", "/init-topics.sh"]
+    restart: "no"
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 2. Database: PostgreSQL 16
+  # ============================================================================
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-postgres}
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-andx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-andx_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-andx_db}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-8GB}
+      - -c
+      - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - wal_compression=${POSTGRES_WAL_COMPRESSION:-on}
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-150}
+    volumes:
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    mem_limit: ${POSTGRES_MEM_LIMIT:-4096m}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-andx} -d ${POSTGRES_DB:-andx_db}"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 3s
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 3. Ingestion Microservice: gateway (Port 8080)
+  # ============================================================================
+  gateway:
+    build:
+      context: .
+      dockerfile: packages/gateway/Dockerfile
+    container_name: ${GATEWAY_CONTAINER_NAME:-gateway}
+    env_file:
+      - .env
+    environment:
+      PORT: "${GATEWAY_PORT:-8080}"
+      KAFKA_BROKERS: "${KAFKA_BROKERS:-broker:9092}"
+      NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=1024}"
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    mem_limit: ${GATEWAY_MEM_LIMIT:-1536m}
+    depends_on:
+      broker:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 4. Aggregator Worker: aggregator
+  # ============================================================================
+  aggregator:
+    build:
+      context: .
+      dockerfile: packages/aggregator/Dockerfile
+    container_name: ${AGGREGATOR_CONTAINER_NAME:-aggregator}
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKERS: "${KAFKA_BROKERS:-broker:9092}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://andx:andx_secret@postgres:5432/andx_db}"
+      NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=1024}"
+    mem_limit: ${AGGREGATOR_MEM_LIMIT:-1536m}
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 5. Earnings Worker: earnings
+  # ============================================================================
+  earnings:
+    build:
+      context: .
+      dockerfile: packages/earnings/Dockerfile
+    container_name: ${EARNINGS_CONTAINER_NAME:-earnings}
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKERS: "${KAFKA_BROKERS:-broker:9092}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://andx:andx_secret@postgres:5432/andx_db}"
+      NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=1024}"
+    mem_limit: ${EARNINGS_MEM_LIMIT:-1536m}
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 6. Public Query & Admin API: api (Port 8081)
+  # ============================================================================
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    container_name: ${API_CONTAINER_NAME:-api}
+    env_file:
+      - .env
+    environment:
+      PORT: "${API_PORT:-8081}"
+      KAFKA_BROKERS: "${KAFKA_BROKERS:-broker:9092}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://andx:andx_secret@postgres:5432/andx_db}"
+      NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=1024}"
+    ports:
+      - "${API_PORT:-8081}:8081"
+    mem_limit: ${API_MEM_LIMIT:-1536m}
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - andx-net
+
+  # ============================================================================
+  # 7. AI Content Classifier Worker: classifier
+  # ============================================================================
+  classifier:
+    build:
+      context: .
+      dockerfile: packages/classifier/Dockerfile
+    container_name: ${CLASSIFIER_CONTAINER_NAME:-classifier}
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKERS: "${KAFKA_BROKERS:-broker:9092}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://andx:andx_secret@postgres:5432/andx_db}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=1024}"
+    mem_limit: ${CLASSIFIER_MEM_LIMIT:-1536m}
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - andx-net
+
+networks:
+  andx-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redpanda_data:

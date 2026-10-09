@@ -1,0 +1,23 @@
+{
+  "name": "@andx/earnings",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "start": "node ./dist/index.js"
+  },
+  "dependencies": {
+    "@andx/contracts": "*",
+    "@andx/domain": "*",
+    "@andx/db": "*",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.6.3"
+  }
+}

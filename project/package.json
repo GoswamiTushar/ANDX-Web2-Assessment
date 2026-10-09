@@ -1,0 +1,21 @@
+{
+  "name": "andx-web2-assessment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ANDX Web2 Engineering Assessment - Event-Driven Microservices Pipeline",
+  "workspaces": [
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

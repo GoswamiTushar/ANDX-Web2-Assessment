@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build and Compilation Artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & Secrets (Never commit actual credentials/API keys)
+.env
+.env.*
+!.env.example
+project/.env
+project/.env.*
+!project/.env.example
+
+# Local Documentation, QA Notes & Research Drafts
+docs/
+
+# Assessment Generated Datasets
+data/
+data-*/
+testdata/
+test-data/
+
+# Logs & Diagnostics
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing & Coverage Reports
+coverage/
+.nyc_output/
+
+# Persistent Storage & Local Mounts
+temp/
+tmp/
+*.tmp
+postgres-data/
+redpanda-data/
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

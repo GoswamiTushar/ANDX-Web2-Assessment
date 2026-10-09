@@ -1,0 +1,4 @@
+name: andx
+
+include:
+  - project/docker-compose.yml
